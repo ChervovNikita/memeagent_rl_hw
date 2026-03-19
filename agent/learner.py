@@ -15,6 +15,7 @@ import numpy as np
 import threading
 import time
 import random
+import os
 from copy import deepcopy
 
 from .actor import Actor
@@ -58,7 +59,9 @@ class Learner:
     bandit_beta = 1.0
     bandit_epsilon = 0.5
 
-    def __init__(self, env_name, N, size, B, burnin, rollout):
+    VALID_MODES = {"baseline", "no_trust_region", "no_soft_watkins"}
+
+    def __init__(self, env_name, N, size, B, burnin, rollout, mode="baseline"):
         torch.manual_seed(0)
         np.random.seed(0)
         random.seed(0)
@@ -66,14 +69,19 @@ class Learner:
         self.size = size
         self.B = B
         self.N = N
+        if mode not in self.VALID_MODES:
+            raise ValueError(f"Invalid mode '{mode}'. Expected one of {sorted(self.VALID_MODES)}")
+        self.mode = mode
+        # Must exist before actors can issue RPCs during startup.
+        self.stopping = False
 
         # models
         self.action_size = gym.make(env_name).action_space.n
         model = Model(N=self.N, action_size=self.action_size)
 
         # episodic novelty module / lifelong novelty module
-        self.episodic_novelty = EpisodicNovelty(N, self.action_size)
-        self.lifelong_novelty = LifelongNovelty(N)
+        self.episodic_novelty = EpisodicNovelty(num_envs=N, action_size=self.action_size, device=self.device)
+        self.lifelong_novelty = LifelongNovelty(lr=5e-4, L=5, device=self.device)
 
         self.model = nn.DataParallel(deepcopy(model)).cuda()
         self.target_model = nn.DataParallel(deepcopy(model)).cuda()
@@ -174,6 +182,8 @@ class Learner:
         Returns:
             future (Future.wait): Halts until value is ready
         """
+        if getattr(self, "stopping", False):
+            raise RuntimeError("training stopped")
         future = self.request_futures[id].then(lambda f: f.wait())
         with self.lock:
             self.request_rpcs[id] = (id, *args)
@@ -190,6 +200,8 @@ class Learner:
         Returns:
             future (Future.wait): Halts until value is ready
         """
+        if getattr(self, "stopping", False):
+            raise RuntimeError("training stopped")
         future = self.return_futures[id].then(lambda f: f.wait())
         self.sample_queue.put(episode)
         self.return_rpcs[id] = episode
@@ -496,8 +508,16 @@ class Learner:
         rewards = extr.unsqueeze(-1) + self.betas.view(1, 1, self.N).to(extr.device) * intr.unsqueeze(-1)
         discount_t = (~dones).float().unsqueeze(-1) * self.discounts.view(1, 1, self.N).to(dones.device)
         actions = actions.unsqueeze(-1).repeat(1, 1, self.N)
+        probs = probs.unsqueeze(-1).repeat(1, 1, self.N)
 
         self.opt.zero_grad()
+
+        bootstrap_q_t1 = None
+        bootstrap_pi_t1 = None
+        if self.mode == "no_trust_region":
+            # Disable A1 trust region and use target network bootstrapping.
+            bootstrap_q_t1 = target_q[1:]
+            bootstrap_pi_t1 = target_pi[1:]
 
         q_loss, q_error = compute_soft_watkins_loss(
             q_t=q,
@@ -506,10 +526,14 @@ class Learner:
             a_t1=actions[self.burnin+1:],
             r_t=rewards[self.burnin:],
             pi_t1=pi[self.burnin+1:],
+            probs_t1=probs[self.burnin+1:],
             discount_t=discount_t[self.burnin:],
             arms=arms[self.burnin:],
             running_errors=self.running_errors,
             is_weights=is_weights,
+            mode=self.mode,
+            bootstrap_q_t1=bootstrap_q_t1,
+            bootstrap_pi_t1=bootstrap_pi_t1,
         )
         q_loss.backward()
 
@@ -586,5 +610,8 @@ class Learner:
 
     @staticmethod
     def save(source, path="saved/final"):
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         torch.save(source.state_dict(), path)
 

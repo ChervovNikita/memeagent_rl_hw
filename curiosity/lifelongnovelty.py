@@ -51,12 +51,14 @@ class LifelongNovelty:
         return reward.to(device)
 
     def update(self, obs):
-        target = self.predictor(obs)
-        expected = self.target(obs)
+        pred = self.predictor(obs)
+        with torch.no_grad():
+            target = self.target(obs)
 
         self.opt.zero_grad()
-        loss = F.mse_loss(expected, target)
+        loss = F.mse_loss(pred, target)
         loss = loss.mean()
+        loss.backward()
         self.opt.step()
 
         return loss.item()

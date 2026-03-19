@@ -90,7 +90,7 @@ class ReplayBuffer:
         self.actions = np.zeros((self.size,), dtype=np.float32)
         self.probs = np.zeros((self.size,), dtype=np.float32)
         self.states = np.zeros((self.size, 2, 512), dtype=np.float32)
-        self.dones = np.zeros((self.size,), dtype=np.bool)
+        self.dones = np.zeros((self.size,), dtype=np.bool_)
         self.arms = np.zeros((self.size,), dtype=np.int32)
 
         # Global Sum Tree
@@ -397,7 +397,7 @@ class LocalBuffer:
         dones[-1] = 1
         arms = np.full_like(dones, arm)
 
-        dones = dones.astype(np.bool)
+        dones = dones.astype(np.bool_)
         arms = arms.astype(np.int32)
 
         length = len(extr)

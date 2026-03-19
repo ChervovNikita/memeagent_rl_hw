@@ -65,7 +65,7 @@ class EpisodicNovelty:
             distance, _ = self.index[id].search(np.expand_dims(emb[i], 0), self.N)
             distances.append(distance)
 
-        distances = np.stack(distances)
+        distances = np.stack(distances).squeeze(1)
         # mask out very big value placeholder by faiss to avoid overflow
         distances[distances > 1e30] = 0
         return distances
@@ -80,9 +80,9 @@ class EpisodicNovelty:
         #     return 0.
 
         dist = self.knn_query(ids, emb)
-        for id in ids:
+        for i, id in enumerate(ids):
             if self.counts[id] >= self.N:
-                self.normalizer.update(dist[id].flatten())
+                self.normalizer.update(dist[i].flatten())
         self.add(ids, emb)
 
         # Calculate kernel output
@@ -96,14 +96,15 @@ class EpisodicNovelty:
 
         # Calculate denominator
         # different from original paper: mean instead of sum so scale is independent of self.N
-        similarity = np.sqrt(np.sum(kernel_output)) + self.c_constant
+        similarity = np.sqrt(np.sum(kernel_output, axis=-1)) + self.c_constant
         # print('sim ', similarity)
         # if similarity < 1:
         #     print('dst', distance_rate)
 
-        similarity = torch.tensor(similarity)
-        mask = (self.counts < self.N) | torch.isnan(similarity) | (similarity > self.max_similarity)
-        intr = torch.where(mask, 0., 1 / similarity)
+        similarity = torch.tensor(similarity, dtype=torch.float32)
+        counts = self.counts[torch.tensor(ids, dtype=torch.long)]
+        mask = (counts < self.N) | torch.isnan(similarity) | (similarity > self.max_similarity)
+        intr = torch.where(mask, torch.zeros_like(similarity), 1.0 / similarity)
 
         return intr.to(device)
 
@@ -116,6 +117,7 @@ class EpisodicNovelty:
         self.opt.zero_grad()
         loss = F.cross_entropy(logits, actions.to(torch.int64).squeeze())
         loss = loss.mean()
+        loss.backward()
         self.opt.step()
 
         return loss.item()

@@ -84,8 +84,28 @@ def compute_target(q_t, a_t, r_t, discount_t, c_t, pi_t):
     return rescale(torch.stack(returns, dim=0).detach())
 
 
-def compute_soft_watkins_loss(q_t, qT_t, a_t, a_t1, r_t, pi_t1, discount_t, arms, is_weights, running_errors,
-                              lambda_=0.95, kappa=0.01, alpha=3.0, n=0.5, tau=0.25):
+def compute_soft_watkins_loss(
+    q_t,
+    qT_t,
+    a_t,
+    a_t1,
+    r_t,
+    pi_t1,
+    discount_t,
+    arms,
+    is_weights,
+    running_errors,
+    probs_t1=None,
+    mode="baseline",
+    bootstrap_q_t1=None,
+    bootstrap_pi_t1=None,
+    lambda_=0.95,
+    kappa=0.01,
+    alpha=3.0,
+    n=0.5,
+    tau=0.25,
+    eps=1e-6,
+):
     """
     Apply inverse of value rescaling before passing into compute_retrace_target()
     Then, apply value rescaling after getting target from compute_retrace_target()
@@ -114,15 +134,29 @@ def compute_soft_watkins_loss(q_t, qT_t, a_t, a_t1, r_t, pi_t1, discount_t, arms
     assert arms.shape == (T, B)
     assert is_weights.shape == (B,)
 
+    if mode not in ("baseline", "no_trust_region", "no_soft_watkins"):
+        raise ValueError(f"Unsupported mode '{mode}'")
+
     pi_t1 = F.softmax(F.log_softmax(pi_t1, dim=-1) / tau, dim=-1)
 
     with torch.no_grad():
-        q_a_t1 = get_index(q_t[1:], a_t1)
-        indicator = (q_a_t1.unsqueeze(-1) >= q_t[1:] - kappa * torch.abs(q_t[1:])).float()
-        c_t1 = lambda_ * (pi_t1 * indicator).sum(-1)
+        q_boot_t1 = q_t[1:] if bootstrap_q_t1 is None else bootstrap_q_t1
+        pi_boot_t1 = pi_t1 if bootstrap_pi_t1 is None else bootstrap_pi_t1
+        pi_boot_t1 = F.softmax(F.log_softmax(pi_boot_t1, dim=-1) / tau, dim=-1)
+
+        if mode == "no_soft_watkins":
+            if probs_t1 is None:
+                raise ValueError("probs_t1 is required for mode='no_soft_watkins'")
+            pi_a_t1 = get_index(pi_boot_t1, a_t1)
+            rho_t1 = pi_a_t1 / (probs_t1 + eps)
+            c_t1 = lambda_ * torch.minimum(torch.ones_like(rho_t1), rho_t1)
+        else:
+            q_a_t1 = get_index(q_boot_t1, a_t1)
+            indicator = (q_a_t1.unsqueeze(-1) >= q_boot_t1 - kappa * torch.abs(q_boot_t1)).float()
+            c_t1 = lambda_ * (pi_boot_t1 * indicator).sum(-1)
 
         # get transformed soft watkins targets
-        target = compute_target(q_t[1:], a_t1, r_t, discount_t, c_t1, pi_t1)
+        target = compute_target(q_boot_t1, a_t1, r_t, discount_t, c_t1, pi_boot_t1)
 
     # get expected q value of taking action a_t
     expected = get_index(q_t[:-1], a_t)
@@ -132,12 +166,20 @@ def compute_soft_watkins_loss(q_t, qT_t, a_t, a_t1, r_t, pi_t1, discount_t, arms
 
     # trust region mask (A1)
     with torch.no_grad():
-        diff = expected - expectedT
-        running_stds = torch.tensor([x.std() for x in running_errors], device=diff.device)
+        running_stds = torch.tensor([x.std() for x in running_errors], device=td_error.device)
         batch_stds = td_error.view(-1, N).std(dim=0)
+        sigma = torch.maximum(
+            torch.maximum(running_stds, batch_stds),
+            torch.tensor(0.01, device=td_error.device),
+        )
 
-        sigma = torch.maximum(torch.maximum(running_stds, batch_stds), torch.tensor(0.01))
-        mask = (torch.abs(diff) > alpha * sigma.view(1, 1, N).repeat(T, B, 1)) & (torch.sign(diff) != expected - target)
+        if mode == "no_trust_region":
+            mask = torch.zeros_like(td_error, dtype=torch.bool)
+        else:
+            diff = expected - expectedT
+            mask = (torch.abs(diff) > alpha * sigma.view(1, 1, N).repeat(T, B, 1)) & (
+                torch.sign(diff) != torch.sign(expected - target)
+            )
 
     # update 𝜎running
     for i, x in enumerate(running_errors):
@@ -146,7 +188,7 @@ def compute_soft_watkins_loss(q_t, qT_t, a_t, a_t1, r_t, pi_t1, discount_t, arms
     td_error = td_error / sigma
 
     loss = td_error ** 2
-    loss = torch.where(mask, torch.tensor(0.), loss)
+    loss = torch.where(mask, torch.zeros_like(loss), loss)
 
     # weight loss according to prioritized experience replay and then take mean
     loss = n * get_index(loss, arms) + ((1-n) / N) * loss.sum(-1)

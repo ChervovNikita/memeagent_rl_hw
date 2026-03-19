@@ -80,7 +80,13 @@ class Actor:
             done = False
 
             while not done:
-                action, prob, next_state, intr = self.get_action(obs, state).wait()
+                try:
+                    action, prob, next_state, intr = self.get_action(obs, state).wait()
+                except RuntimeError as err:
+                    # During controlled shutdown, learner RRef can disappear while actors are mid-loop.
+                    if _is_rpc_shutdown_error(err):
+                        return
+                    raise
 
                 next_obs, reward, done = self.env.step(action)
 
@@ -92,7 +98,25 @@ class Actor:
                 state = next_state
 
             episode = self.local_buffer.finish(time.time()-start, self.arm)
-            self.arm = self.return_episode(episode).wait()
+            try:
+                self.arm = self.return_episode(episode).wait()
+            except RuntimeError as err:
+                if _is_rpc_shutdown_error(err):
+                    return
+                raise
 
             self.count += 1
+
+
+def _is_rpc_shutdown_error(err: RuntimeError) -> bool:
+    msg = str(err)
+    shutdown_markers = (
+        "training stopped",
+        "has been deleted",
+        "RPC agent",
+        "connection reset",
+        "eof",
+        "pipe closed",
+    )
+    return any(marker.lower() in msg.lower() for marker in shutdown_markers)
 
