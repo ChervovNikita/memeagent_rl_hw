@@ -1,0 +1,7 @@
+{"event": "training_complete", "timestamp": "2026-03-19T18:38:52.894051", "target_frames": 5000000, "final_frames": 5001027, "final_updates": 1181, "final_loss": 0.7564502873948755, "final_policy_loss": 99.59873962402344, "final_intrinsic_loss": 0.37510425908112666, "final_reward": 2.0, "final_intrinsic": 404.5728759765625, "final_epsilon": 0.1, "final_arm": 3.0, "final_replay_ratio": 2.421027104142658, "checkpoint_path": "saved/final_2m", "training_log_path": "logs/2026_03_19_13_20.txt", "training_raw_log_copy": "results/train_validate_20260319_132013/training_rows_raw.log", "training_rows_csv": "results/train_validate_20260319_132013/training_rows.csv", "training_row_count": 1873}
+{"event": "validation_episode", "timestamp": "2026-03-19T19:49:20.976470", "episode": 1, "return": 1.0, "steps": 49}
+{"event": "validation_episode", "timestamp": "2026-03-19T19:49:21.272002", "episode": 2, "return": 1.0, "steps": 49}
+{"event": "validation_episode", "timestamp": "2026-03-19T19:49:21.411016", "episode": 3, "return": 0.0, "steps": 21}
+{"event": "validation_episode", "timestamp": "2026-03-19T19:49:21.710274", "episode": 4, "return": 1.0, "steps": 51}
+{"event": "validation_episode", "timestamp": "2026-03-19T19:49:21.971883", "episode": 5, "return": 1.0, "steps": 45}
+{"event": "validation_complete", "timestamp": "2026-03-19T19:49:21.978440", "env_name": "ALE/Breakout-v5", "episodes": 5, "mean_return": 0.8, "min_return": 0.0, "max_return": 1.0, "checkpoint_path": "saved/final_2m", "episodes_csv": "results/train_validate_20260319_132013/validation_episodes.csv"}

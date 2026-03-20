@@ -2,6 +2,7 @@ import argparse
 import csv
 import json
 import os
+import sys
 import time
 import threading
 from datetime import datetime
@@ -201,29 +202,44 @@ def run_worker(
     checkpoint_path: str,
     run_dir: str,
     mode: str,
+    stop_file: str,
 ) -> None:
     world_size = 1 + num_actors
     node_name = "learner" if rank == 0 else f"actor{rank - 1}"
     rpc.init_rpc(node_name, rank=rank, world_size=world_size)
 
-    if rank == 0:
-        learner = Learner(
-            env_name=env_name,
-            N=num_actors,
-            size=buffer_size,
-            B=batch_size,
-            burnin=burnin,
-            rollout=rollout,
-            mode=mode,
-        )
-        run_training_until_frames(
-            learner=learner,
-            max_frames=max_frames,
-            checkpoint_path=checkpoint_path,
-            run_dir=run_dir,
-        )
-
-    rpc.shutdown()
+    try:
+        if rank == 0:
+            learner = Learner(
+                env_name=env_name,
+                N=num_actors,
+                size=buffer_size,
+                B=batch_size,
+                burnin=burnin,
+                rollout=rollout,
+                mode=mode,
+            )
+            run_training_until_frames(
+                learner=learner,
+                max_frames=max_frames,
+                checkpoint_path=checkpoint_path,
+                run_dir=run_dir,
+            )
+            Path(stop_file).write_text("stop", encoding="utf-8")
+            # Rank 0 has several background/daemon threads. Avoid fragile RPC shutdown
+            # path that can abort the process before parent reaches evaluation.
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(0)
+        else:
+            # Keep actor workers alive to host remote Actor objects until learner finishes.
+            while not os.path.exists(stop_file):
+                time.sleep(0.2)
+    finally:
+        # Use non-graceful shutdown to avoid hangs on stale RPC futures.
+        # Rank 0 exits above; only non-learner workers should reach this.
+        if rank != 0:
+            rpc.shutdown(graceful=False)
 
 
 @torch.no_grad()
@@ -329,6 +345,9 @@ def main() -> None:
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = args.run_dir or str(Path("results") / f"train_validate_{run_id}")
     Path(run_dir).mkdir(parents=True, exist_ok=True)
+    stop_file = str(Path(run_dir) / ".rpc_stop")
+    if os.path.exists(stop_file):
+        os.remove(stop_file)
     with Path(run_dir, "config.json").open("w", encoding="utf-8") as f:
         json.dump(
             {
@@ -362,6 +381,7 @@ def main() -> None:
             args.checkpoint_path,
             run_dir,
             args.mode,
+            stop_file,
         ),
         nprocs=1 + PAPER_PARAMS["num_mixtures"],
         join=True,
