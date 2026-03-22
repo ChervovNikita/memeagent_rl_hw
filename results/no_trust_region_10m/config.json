@@ -1,0 +1,29 @@
+{
+  "env_input": "BreakoutDeterministic-v4",
+  "env_resolved": "ALE/Breakout-v5",
+  "max_frames": 10000000,
+  "eval_episodes": 100,
+  "eval_max_steps": 20000,
+  "checkpoint_path": "saved/final_2m",
+  "device": "cuda",
+  "mode": "no_trust_region",
+  "paper_params": {
+    "num_mixtures": 16,
+    "bandit_beta": 1.0,
+    "bandit_epsilon": 0.5,
+    "max_discount": 0.9997,
+    "min_discount": 0.97,
+    "trace_length": 160,
+    "burn_in": 0,
+    "im_reward_scale_beta_im": 0.1,
+    "priority_exponent": 0.6,
+    "importance_sampling_exponent": 0.4,
+    "batch_size": 64,
+    "replay_capacity_trajectories": 200000,
+    "rl_adam_lr": 0.0003,
+    "lambda": 0.95,
+    "kappa": 0.01,
+    "tau": 0.25,
+    "max_kl": 0.5
+  }
+}

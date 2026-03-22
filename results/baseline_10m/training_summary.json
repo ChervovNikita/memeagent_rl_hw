@@ -1,0 +1,18 @@
+{
+  "target_frames": 10000000,
+  "final_frames": 10003061,
+  "final_updates": 2300,
+  "final_loss": 0.7484932226110875,
+  "final_policy_loss": 149.0498046875,
+  "final_intrinsic_loss": 0.2772977227141382,
+  "final_reward": 5.0,
+  "final_intrinsic": 1317.2176513671875,
+  "final_epsilon": 0.1,
+  "final_arm": 12.0,
+  "final_replay_ratio": 2.3563711346311718,
+  "checkpoint_path": "saved/final_2m",
+  "training_log_path": "logs/2026_03_20_15_40.txt",
+  "training_raw_log_copy": "results/train_validate_20260320_153942/training_rows_raw.log",
+  "training_rows_csv": "results/train_validate_20260320_153942/training_rows.csv",
+  "training_row_count": 3518
+}
